@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var displayItems: [Settings.MenuBarMode: NSMenuItem] = [:]
     private var showClaudeItem: NSMenuItem!
     private var showCodexItem: NSMenuItem!
+    private var claudeLoginItem: NSMenuItem!
     private var updateItem: NSMenuItem!
     private var titleObserver: Any?
 
@@ -29,6 +30,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var currentInterval: TimeInterval = 300
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // LSUIElement 应用没有主菜单，⌘C/V/X/A 在文本框里会失效；挂一个隐形编辑菜单让快捷键生效
+        let editMenu = NSMenu()
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let editItem = NSMenuItem()
+        editItem.submenu = editMenu
+        let mainMenu = NSMenu()
+        mainMenu.addItem(editItem)
+        NSApp.mainMenu = mainMenu
+
         Settings.materializeDefaults()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateStatusImage()
@@ -81,6 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         notifyMenuItem.submenu = notifyMenu
         menu.addItem(notifyMenuItem)
+
+        claudeLoginItem = menu.addItem(withTitle: "", action: #selector(claudeLoginOrOut), keyEquivalent: "")
+        claudeLoginItem.target = self
 
         let langItem = NSMenuItem(title: "语言 / Language", action: nil, keyEquivalent: "")
         let langMenu = NSMenu()
@@ -218,6 +234,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task { await refresh() }
     }
 
+    // MARK: - ByteRate 独立 Claude 登录（解除钥匙串弹框）
+
+    @objc private func claudeLoginOrOut() {
+        if ClaudeAuth.hasOwnCredentials {
+            ClaudeAuth.logout()
+            updateMenuTitles()
+            Task { await refresh() }
+            return
+        }
+        let session = ClaudeAuth.beginLogin()
+        NSWorkspace.shared.open(session.authorizeURL)
+
+        let alert = NSAlert()
+        alert.messageText = L.t("连接 Claude 账号", "Connect your Claude account")
+        alert.informativeText = L.t("已在浏览器打开授权页面。完成授权后，把页面显示的授权码粘贴到这里：",
+                                    "We've opened the authorization page in your browser. Once you approve, paste the code shown here:")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        field.placeholderString = L.t("粘贴授权码", "Paste authorization code")
+        alert.accessoryView = field
+        alert.addButton(withTitle: L.t("完成登录", "Complete sign-in"))
+        alert.addButton(withTitle: L.t("取消", "Cancel"))
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let code = field.stringValue
+        Task { @MainActor in
+            do {
+                try await ClaudeAuth.completeLogin(pastedCode: code, session: session)
+                updateMenuTitles()
+                await refresh()   // 面板立即刷出额度，就是最好的"登录成功"反馈
+            } catch {
+                let err = NSAlert()
+                err.messageText = L.t("连接失败，请重试", "Couldn't connect — please try again")
+                err.informativeText = (error as? UsageError)?.bi.text ?? error.localizedDescription
+                NSApp.activate(ignoringOtherApps: true)
+                err.runModal()
+            }
+        }
+    }
+
     // MARK: - 检查更新
 
     @objc private func checkForUpdates() {
@@ -343,6 +400,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         showClaudeItem.state = Settings.showClaude ? .on : .off
         showCodexItem.state = Settings.showCodex ? .on : .off
+        claudeLoginItem.title = ClaudeAuth.hasOwnCredentials
+            ? L.t("断开 Claude 账号", "Disconnect Claude account")
+            : L.t("连接 Claude 账号…", "Connect Claude account…")
+        claudeLoginItem.isHidden = !Settings.showClaude
         updateItem.title = L.t("检查更新…", "Check for updates…")
 
         notifyMenuItem.title = L.t("低额度通知", "Low quota alerts")
