@@ -21,6 +21,56 @@ struct ClaudeProvider: UsageProvider {
     }
 
     func fetch() async -> ProviderState {
+        // ByteRate 自己登录过 Claude 时优先走自有凭据（独立 token 链，零钥匙串弹框）
+        if ClaudeAuth.hasOwnCredentials {
+            return await Self.fetchWithOwnCredentials()
+        }
+        return await Self.fetchWithSharedCredentials()
+    }
+
+    // MARK: - 自有凭据路径（独立登录）
+
+    private static func fetchWithOwnCredentials() async -> ProviderState {
+        do {
+            guard var creds = ClaudeAuth.load() else {
+                throw UsageError.message("ByteRate 的 Claude 登录已失效，请在菜单里重新登录",
+                                         "ByteRate's Claude sign-in is broken — sign in again from the menu")
+            }
+            if creds.expiresAt / 1000 < Date().timeIntervalSince1970 + 60 {
+                creds = try await ClaudeAuth.refreshedCredentials(creds)
+            }
+            var (status, data) = try await callUsage(token: creds.accessToken)
+            if status == 401 {
+                creds = try await ClaudeAuth.refreshedCredentials(creds)
+                (status, data) = try await callUsage(token: creds.accessToken)
+            }
+            if status == 403 {
+                throw UsageError.message("此登录没有额度查询权限，请在菜单里重新登录 Claude",
+                                         "This sign-in lacks usage permission — sign in again from the menu")
+            }
+            if status == 429 {
+                throw UsageError.message("请求过于频繁被临时限流（429）", "Temporarily rate-limited (429)")
+            }
+            guard status == 200 else {
+                throw UsageError.message("额度接口返回 \(status)", "Usage API returned \(status)")
+            }
+            let usage = parseUsage(HTTP.json(data), plan: creds.subscriptionType)
+            guard usage.hourly != nil || usage.weekly != nil else {
+                throw UsageError.message("接口返回结构无法识别，可能已变更",
+                                         "Unrecognized usage API response — schema may have changed")
+            }
+            return .ok(usage)
+        } catch let e as UsageError {
+            return .error(e.bi)
+        } catch {
+            let raw = error.localizedDescription
+            return .error(BiText(zh: raw, en: raw))
+        }
+    }
+
+    // MARK: - 共用 CLI 凭据路径（默认）
+
+    private static func fetchWithSharedCredentials() async -> ProviderState {
         do {
             // token 过期时由 ByteRate 自己刷新并写回（写回让 Claude Code 也同步到新 token，不会登出）。
             var creds = try Self.loadCredentials()

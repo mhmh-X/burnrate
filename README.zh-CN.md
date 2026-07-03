@@ -81,6 +81,8 @@ open /Applications/ByteRate.app
 
 凭据只在本机读取，只发往 Anthropic/OpenAI 第一方主机：`api.anthropic.com` / `claude.ai` 和 `chatgpt.com` / `auth.openai.com`。这些额度接口不是公开稳定 API，未来可能变化；如果返回结构无法识别，ByteRate 会报错而不是猜测额度。唯一的额外网络请求是你手动点「检查更新」时查询 GitHub Releases API。除此之外没有任何其他服务器、没有统计埋点、不收集任何数据。token 过期时，ByteRate 会自动刷新并写回各 CLI 存放凭据的位置（Claude 在钥匙串、Codex 在 `~/.codex/auth.json`），所以即使你很少打开 CLI，两栏也保持新鲜，且 CLI 仍保持登录。
 
+如果 macOS 反复索要钥匙串密码（Claude Code 每次刷新 token 都会重写该条目、重置其访问控制所致），可在菜单里点 **连接 Claude 账号**：ByteRate 会用自己的 OAuth 凭据登录、存在自己的文件里，从此完全不碰 Claude Code 的钥匙串，弹框消失，且不影响你的 CLI 登录。
+
 ## 排障
 
 - **找不到凭据**——先用对应 CLI 登录，再刷新 ByteRate。

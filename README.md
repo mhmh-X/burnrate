@@ -82,6 +82,8 @@ If Claude is enabled, the first quota fetch asks for keychain access to read the
 
 Credentials are read locally and sent only to first-party Anthropic/OpenAI hosts: `api.anthropic.com` / `claude.ai` and `chatgpt.com` / `auth.openai.com`. These quota endpoints are not public stable APIs and may change; ByteRate fails closed instead of guessing if the response shape is not recognized. The only other network request is the manual "Check for updates" action, which queries the GitHub Releases API. No other servers, no analytics, no data collection. When a token expires, ByteRate refreshes it and writes it back where each CLI keeps it (Claude in the keychain, Codex in `~/.codex/auth.json`), so the panels stay fresh even if you rarely open the CLI, and the CLIs stay signed in.
 
+If macOS keeps asking for your keychain password (Claude Code rewrites that item on every token refresh, which resets its access control), use **Connect Claude account** in the menu: ByteRate signs in with its own OAuth credential, stored in its own file — it then stops touching Claude Code's keychain entirely, so the prompts disappear and your CLI login is untouched.
+
 ## Troubleshooting
 
 - **No credentials found** — sign in with the relevant CLI first, then refresh ByteRate.
