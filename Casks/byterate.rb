@@ -1,8 +1,8 @@
 # 安装：brew tap mhmh-X/byterate https://github.com/mhmh-X/byterate && brew install --cask byterate
 # version 和 sha256 由 .github/workflows/release.yml 在每次发版时自动更新。
 cask "byterate" do
-  version "0.2.7"
-  sha256 "ad01f9738ed7754bce104a0776a11b47e2ede049fa9288cc7892a4b3955f29cd"
+  version "0.2.8"
+  sha256 "cdec0d44102de297b3141ddae8a5a0741fe63d90cd0a8b4c2dd1efe88f82c42c"
 
   url "https://github.com/mhmh-X/byterate/releases/download/v#{version}/ByteRate-#{version}.zip"
   name "ByteRate"
