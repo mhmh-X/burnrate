@@ -128,6 +128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         UNUserNotificationCenter.current().delegate = self
         Notifier.requestAuthorizationIfNeeded()
         scheduleTimer(interval: Self.normalInterval)
+        configureTaskStatusDefaults()
+        startStatusTimer()
         Task { await refresh() }
     }
 
@@ -179,6 +181,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.terminate(nil)
     }
 
+    private var spinnerFrame = 0
+
+    /// 菜单栏服务商图标随任务状态替换：运行=loading 帧，待确认=⚠，空闲/未启用=原 logo(nil)。
+    private func stateIcon(_ taskStatus: TaskStatus.State, showProvider: Bool) -> NSImage? {
+        guard showProvider else { return nil }
+        switch taskStatus {
+        case .running: return Icons.spinnerGlyph(frame: spinnerFrame, size: 13)
+        case .waiting: return Icons.warningGlyph(size: 12)
+        case .idle, .none: return nil
+        }
+    }
+
+    private var claudeStateIcon: NSImage? {
+        stateIcon(state.taskStatus, showProvider: Settings.showClaude)
+    }
+
+    private var codexStateIcon: NSImage? {
+        stateIcon(state.codexTaskStatus, showProvider: Settings.showCodex)
+    }
+
     private func updateStatusImage() {
         statusItem.button?.title = ""
         statusItem.button?.font = nil
@@ -196,11 +218,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             claudeText: state.statusText(for: state.claude),
             codexText: state.statusText(for: state.codex),
             showClaude: Settings.showClaude,
-            showCodex: Settings.showCodex
+            showCodex: Settings.showCodex,
+            claudeIcon: claudeStateIcon,
+            codexIcon: codexStateIcon
         )
         statusItem.length = image.size.width
         statusItem.button?.image = image
         statusItem.button?.imagePosition = .imageOnly
+    }
+
+    // MARK: - 任务状态轮询
+
+    private var statusTimer: Timer?
+    private var codexProbeInFlight = false
+    private var lastCodexProbe = Date.distantPast
+
+    private func configureTaskStatusDefaults() {
+        guard Settings.showClaude, !TaskStatus.isEnabled else { return }
+        try? TaskStatus.enable()
+    }
+
+    private func startStatusTimer() {
+        statusTimer?.invalidate()
+        statusTimer = nil
+        // Claude 状态读本地小 JSON 文件；200ms 只用于菜单栏 loading 动画，Codex 探针另行节流。
+        statusTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tickStatus() }
+        }
+    }
+
+    private func tickStatus() {
+        let claudeNow = Settings.showClaude ? TaskStatus.current() : .none
+        spinnerFrame += 1
+        if claudeNow != state.taskStatus {
+            state.taskStatus = claudeNow
+            updateStatusImage()
+        } else if claudeNow == .running || state.codexTaskStatus == .running {
+            updateStatusImage()
+        }
+        tickCodexStatusIfNeeded()
+    }
+
+    private func tickCodexStatusIfNeeded() {
+        guard Settings.showCodex else {
+            if state.codexTaskStatus != .none { state.codexTaskStatus = .none; updateStatusImage() }
+            return
+        }
+        guard !codexProbeInFlight, Date().timeIntervalSince(lastCodexProbe) > 2 else { return }
+        codexProbeInFlight = true
+        lastCodexProbe = Date()
+        Task.detached(priority: .utility) {
+            let current = CodexTaskStatus.current()
+            await MainActor.run {
+                self.codexProbeInFlight = false
+                if current != self.state.codexTaskStatus {
+                    self.state.codexTaskStatus = current
+                    self.updateStatusImage()
+                }
+            }
+        }
     }
 
     // MARK: - 菜单栏显示 / 通知
@@ -228,6 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !Settings.showCodex { state.clearNote(claude: false) }
         }
         state.bumpSettings()
+        if claude, Settings.showClaude { configureTaskStatusDefaults() }
         updateStatusImage()
         updateMenuTitles()
         resizeHosting()

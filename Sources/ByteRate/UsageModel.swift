@@ -49,7 +49,11 @@ enum UsageError: Error {
 extension Date {
     /// 距现在的剩余时长："3 天 4 小时" / "3d 4h"。
     var remainingDescription: String {
-        let total = Int(timeIntervalSinceNow)
+        remainingDescription(from: Date())
+    }
+
+    func remainingDescription(from now: Date) -> String {
+        let total = Int(timeIntervalSince(now))
         guard total > 0 else { return L.t("即将", "soon") }
         let days = total / 86400
         let hours = total % 86400 / 3600

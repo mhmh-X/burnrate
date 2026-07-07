@@ -14,6 +14,7 @@ app: build
 	cp $(BUILDDIR)/$(APP) $(APPDIR)/Contents/MacOS/
 	cp Resources/Info.plist $(APPDIR)/Contents/
 	cp Resources/AppIcon.icns $(APPDIR)/Contents/Resources/
+	cp Resources/claude-status-hook.mjs $(APPDIR)/Contents/Resources/
 	codesign --force --sign - $(APPDIR)
 
 install: app
@@ -34,6 +35,7 @@ release: clean
 	cp .build/apple/Products/Release/$(APP) $(APPDIR)/Contents/MacOS/
 	cp Resources/Info.plist $(APPDIR)/Contents/
 	cp Resources/AppIcon.icns $(APPDIR)/Contents/Resources/
+	cp Resources/claude-status-hook.mjs $(APPDIR)/Contents/Resources/
 	plutil -replace CFBundleShortVersionString -string $(VERSION) $(APPDIR)/Contents/Info.plist
 	codesign --force --sign - $(APPDIR)
 	cd build && ditto -c -k --keepParent $(APP).app $(APP)-$(VERSION).zip

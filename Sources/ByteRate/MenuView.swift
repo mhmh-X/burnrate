@@ -5,22 +5,25 @@ struct MenuView: View {
     static let panelWidth: CGFloat = 300
 
     @ObservedObject var state: AppState
+    @State private var now = Date()
+    private let clock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if Settings.showClaude {
-                ProviderSection(title: "Claude", icon: Image(nsImage: Icons.claude(size: 16)), iconIsTemplate: false, state: state.claude, note: state.claudeNote, updated: state.claudeUpdated, refreshing: state.refreshing)
+                ProviderSection(title: "Claude", icon: Image(nsImage: Icons.claude(size: 16)), iconIsTemplate: false, state: state.claude, note: state.claudeNote, updated: state.claudeUpdated, refreshing: state.refreshing, now: now, taskStatus: state.taskStatus)
             }
             if Settings.showClaude && Settings.showCodex {
                 Divider()
             }
             if Settings.showCodex {
-                ProviderSection(title: "Codex", icon: Image(nsImage: Icons.openAI(size: 16)), iconIsTemplate: true, state: state.codex, note: state.codexNote, updated: state.codexUpdated, refreshing: state.refreshing)
+                ProviderSection(title: "Codex", icon: Image(nsImage: Icons.openAI(size: 16)), iconIsTemplate: true, state: state.codex, note: state.codexNote, updated: state.codexUpdated, refreshing: state.refreshing, now: now, taskStatus: state.codexTaskStatus)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(width: Self.panelWidth, alignment: .leading)
+        .onReceive(clock) { now = $0 }
     }
 }
 
@@ -32,20 +35,31 @@ private struct ProviderSection: View {
     let note: BiText?
     let updated: Date?
     let refreshing: Bool
+    let now: Date
+    var taskStatus: TaskStatus.State = .none
 
     private func isPaidPlan(_ plan: String?) -> Bool {
         guard let p = plan?.lowercased() else { return false }
         return ["plus", "pro", "max", "team", "enterprise", "business"].contains(p)
     }
 
+    /// 头部图标按任务状态替换：运行=转圈，待确认=橙色警示，空闲/未启用=服务商 logo。
+    @ViewBuilder private var headerIcon: some View {
+        switch taskStatus {
+        case .running:
+            ProgressView().controlSize(.small).frame(width: 16, height: 16)
+        case .waiting:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14)).foregroundStyle(.orange).frame(width: 16, height: 16)
+        case .idle, .none:
+            if iconIsTemplate { icon.renderingMode(.template).foregroundStyle(.primary) } else { icon }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                if iconIsTemplate {
-                    icon.renderingMode(.template).foregroundStyle(.primary)
-                } else {
-                    icon
-                }
+                headerIcon
                 Text(title).font(.headline)
                 if case .ok(let u) = state, let plan = u.plan {
                     Text(plan.capitalized)
@@ -53,15 +67,18 @@ private struct ProviderSection: View {
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(.quaternary, in: Capsule())
                 }
+                if taskStatus == .waiting {
+                    Text(L.t("待确认", "Needs you")).font(.caption2).foregroundStyle(.orange)
+                }
                 Spacer()
                 // 到期日仅 Codex 有（来自 id_token）。OpenAI 端的日期可能滞后，故：
                 // 未来日期 → 显示到期日；已过去但仍是付费档 → 说明已续费、显示"订阅有效"；
                 // 真到期则 plan_type 会降为 free，这里都不显示，徽章会变成 Free
                 if case .ok(let u) = state, let expiry = u.planExpiresAt {
-                    if expiry.timeIntervalSinceNow > 0 {
+                    if expiry.timeIntervalSince(now) > 0 {
                         Text(L.t("订阅 \(expiry.expiryDescription) 到期", "Plan expires \(expiry.expiryDescription)"))
                             .font(.caption2)
-                            .foregroundStyle(expiry.timeIntervalSinceNow < 3 * 86400 ? .orange : .secondary)
+                            .foregroundStyle(expiry.timeIntervalSince(now) < 3 * 86400 ? .orange : .secondary)
                     } else if isPaidPlan(u.plan) {
                         Text(L.t("订阅有效", "Active"))
                             .font(.caption2)
@@ -85,8 +102,8 @@ private struct ProviderSection: View {
                 Text(msg.text).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             case .ok(let usage):
-                if let h = usage.hourly { UsageRow(label: L.t("5 小时", "5-hour"), usage: h) }
-                if let w = usage.weekly { UsageRow(label: L.t("每周", "Weekly"), usage: w) }
+                if let h = usage.hourly { UsageRow(label: L.t("5 小时", "5-hour"), usage: h, now: now) }
+                if let w = usage.weekly { UsageRow(label: L.t("每周", "Weekly"), usage: w, now: now) }
                 if usage.hourly == nil && usage.weekly == nil {
                     Text(L.t("没有返回额度数据", "No quota data returned")).font(.caption).foregroundStyle(.secondary)
                 }
@@ -104,6 +121,7 @@ private struct ProviderSection: View {
 private struct UsageRow: View {
     let label: String
     let usage: WindowUsage
+    let now: Date
 
     private var barColor: Color {
         switch usage.remainingPercent {
@@ -125,7 +143,7 @@ private struct UsageRow: View {
             BurnBar(remaining: usage.remainingPercent / 100, color: barColor)
                 .frame(height: 5)
             if let r = usage.resetsAt {
-                let duration = Text(r.remainingDescription)
+                let duration = Text(r.remainingDescription(from: now))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.accentColor)
                 if L.isZH {

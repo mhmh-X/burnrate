@@ -38,8 +38,34 @@ enum Icons {
     /// 菜单栏用：把「Claude图标 88%  OpenAI图标 95%」合成一张模板图，
     /// 由系统统一着色，自动适配菜单栏明暗。
     /// 文本传 nil 时只画对应服务商图标；服务商关闭时整组不画。
+    /// 任务状态字形（模板，随菜单栏着色）：loading 用盲文帧动画，待确认用警示三角。
+    private static let spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    static func spinnerGlyph(frame: Int, size: CGFloat) -> NSImage {
+        textGlyph(spinnerFrames[frame % spinnerFrames.count], size: size)
+    }
+    static func warningGlyph(size: CGFloat) -> NSImage {
+        if let sym = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil) {
+            let out = sym.withSymbolConfiguration(.init(pointSize: size, weight: .regular)) ?? sym
+            out.isTemplate = true
+            return out
+        }
+        return textGlyph("⚠", size: size)
+    }
+    private static func textGlyph(_ s: String, size: CGFloat) -> NSImage {
+        let str = NSAttributedString(string: s, attributes: [.font: NSFont.systemFont(ofSize: size),
+                                                             .foregroundColor: NSColor.black])
+        let sz = str.size()
+        let img = NSImage(size: NSSize(width: max(sz.width, size), height: size), flipped: false) { rect in
+            str.draw(at: NSPoint(x: (rect.width - sz.width) / 2, y: (rect.height - sz.height) / 2))
+            return true
+        }
+        img.isTemplate = true
+        return img
+    }
+
     static func statusImage(claudeText: String?, codexText: String?,
-                            showClaude: Bool = true, showCodex: Bool = true) -> NSImage {
+                            showClaude: Bool = true, showCodex: Bool = true,
+                            claudeIcon: NSImage? = nil, codexIcon: NSImage? = nil) -> NSImage {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
         let icon: CGFloat = 13
@@ -47,14 +73,14 @@ enum Icons {
         let gap: CGFloat = 9       // 两组之间间距
         let h: CGFloat = 16
 
-        // (图标, 数字) 组
+        // (图标, 数字) 组；服务商图标可被任务状态字形替换
         var groups: [(NSImage, NSAttributedString?)] = []
         if showClaude {
-            groups.append((render(claudeSVG, color: "#000000", size: icon),
+            groups.append((claudeIcon ?? render(claudeSVG, color: "#000000", size: icon),
                            claudeText.map { NSAttributedString(string: $0, attributes: attrs) }))
         }
         if showCodex {
-            groups.append((render(openAISVG, color: "#000000", size: icon),
+            groups.append((codexIcon ?? render(openAISVG, color: "#000000", size: icon),
                            codexText.map { NSAttributedString(string: $0, attributes: attrs) }))
         }
         if groups.isEmpty {

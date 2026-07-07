@@ -16,6 +16,10 @@ final class AppState: ObservableObject {
     @Published var refreshing = false
     /// 当前界面语言（"zh" / "en"），改变时触发整个 UI 重渲染。
     @Published var languageCode: String = L.code
+    /// Claude Code 任务状态（启动时自动尝试安装 hook，失败则保持 none）。
+    @Published var taskStatus: TaskStatus.State = .none
+    /// Codex 任务状态（通过本机会话文件末尾事件 best-effort 获取）。
+    @Published var codexTaskStatus: TaskStatus.State = .none
 
     func setLanguage(_ code: String) {
         L.set(code)
