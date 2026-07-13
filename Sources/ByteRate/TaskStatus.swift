@@ -244,8 +244,11 @@ enum CodexTaskStatus {
                           let date = formatter.date(from: raw) {
                     started = date
                 }
-                latestEvent = .started(started, latestTitle)
+                latestEvent = .started(started, nil)
             }
+        }
+        if case .started(let started, _) = latestEvent {
+            return .started(started, latestTitle)
         }
         return latestEvent
     }
@@ -269,8 +272,8 @@ enum CodexTaskStatus {
     }
 
     private static func userMessageText(_ payload: [String: Any]) -> String? {
-        guard let content = payload["content"] as? [[String: Any]] else { return nil }
-        let text = content.compactMap { $0["text"] as? String }
+        guard let content = payload["content"] as? [Any] else { return nil }
+        let text = content.compactMap { ($0 as? [String: Any])?["text"] as? String }
             .joined(separator: " ")
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
