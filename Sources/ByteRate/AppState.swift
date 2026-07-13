@@ -108,8 +108,35 @@ final class AppState: ObservableObject {
                 window = [u.hourly, u.weekly].compactMap { $0 }
                     .min { $0.remainingPercent < $1.remainingPercent }
             }
-            guard let w = window else { return "?" }
+            let fallback: WindowUsage? = Settings.menuBarMode == .fiveHour ? u.weekly : u.hourly
+            guard let w = window ?? fallback else { return "?" }
             return "\(Int(w.remainingPercent.rounded()))%"
         }
+    }
+
+    /// 当前已知额度中是否存在某个窗口。加载中或出错时保留菜单项可选，避免错误禁用。
+    func hasMenuBarWindow(_ mode: Settings.MenuBarMode) -> Bool {
+        guard mode == .fiveHour || mode == .weekly else { return true }
+        let states = (Settings.showClaude ? [claude] : []) + (Settings.showCodex ? [codex] : [])
+        let known = states.compactMap { state -> ProviderUsage? in
+            if case .ok(let usage) = state { return usage }
+            return nil
+        }
+        guard !known.isEmpty else { return true }
+        return known.contains { usage in
+            mode == .fiveHour ? usage.hourly != nil : usage.weekly != nil
+        }
+    }
+
+    /// 所选窗口在当前服务商都不存在时，切换到唯一可用的窗口。
+    @discardableResult
+    func normalizeMenuBarMode() -> Bool {
+        let mode = Settings.menuBarMode
+        guard mode == .fiveHour || mode == .weekly else { return false }
+        if hasMenuBarWindow(mode) { return false }
+        let fallback: Settings.MenuBarMode = mode == .fiveHour ? .weekly : .fiveHour
+        guard hasMenuBarWindow(fallback) else { return false }
+        Settings.menuBarMode = fallback
+        return true
     }
 }

@@ -20,7 +20,7 @@ ByteRate puts the answer in your menu bar. Nothing more.
 
 ## Features
 
-- Menu bar shows remaining percentage per provider — choose 5-hour window (default), weekly window, lowest of both, or icons only
+- Menu bar shows remaining percentage per provider — choose 5-hour or weekly window (the available window is selected automatically), lowest of both, or icons only
 - Burn-style progress bars: colored remainder on the right, burned-away on the left, color shifts green → orange → red
 - Reset countdown ("resets in 3h 51m (14:00)") for every window
 - Low-quota notifications with a provider mark — pick any of below 20% / 10% / 5%, off by default; one alert per window per reset cycle, no spam (subscription-expiry alerts follow the same switch)

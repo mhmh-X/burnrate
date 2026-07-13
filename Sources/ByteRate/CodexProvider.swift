@@ -147,9 +147,33 @@ struct CodexProvider: UsageProvider {
 
     private static func parseUsage(_ json: [String: Any], idToken: String?) -> ProviderUsage {
         let rl = json["rate_limit"] as? [String: Any] ?? json["rate_limits"] as? [String: Any] ?? [:]
+        let primary = rl["primary_window"] ?? rl["primary"]
+        let secondary = rl["secondary_window"] ?? rl["secondary"]
+        let parsedPrimary = parseWindow(primary)
+        let parsedSecondary = parseWindow(secondary)
+        let hourly: WindowUsage?
+        let weekly: WindowUsage?
+
+        // API 通常用 primary/secondary 表示 5 小时/周，但窗口数量变化后
+        // primary 可能代表唯一剩余的周窗，因此优先依据窗口周期归类。
+        if parsedSecondary != nil {
+            hourly = parsedPrimary
+            weekly = parsedSecondary
+        } else if let primaryDict = primary as? [String: Any], let parsedPrimary {
+            if isWeeklyWindow(primaryDict) {
+                hourly = nil
+                weekly = parsedPrimary
+            } else {
+                hourly = parsedPrimary
+                weekly = nil
+            }
+        } else {
+            hourly = parsedPrimary
+            weekly = nil
+        }
         return ProviderUsage(
-            hourly: parseWindow(rl["primary_window"] ?? rl["primary"]),
-            weekly: parseWindow(rl["secondary_window"] ?? rl["secondary"]),
+            hourly: hourly,
+            weekly: weekly,
             plan: json["plan_type"] as? String,
             planExpiresAt: idToken.flatMap(subscriptionExpiry)
         )
@@ -181,5 +205,27 @@ struct CodexProvider: UsageProvider {
             resets = Date(timeIntervalSinceNow: s)
         }
         return WindowUsage(usedPercent: used, resetsAt: resets)
+    }
+
+    private static func isWeeklyWindow(_ dict: [String: Any]) -> Bool {
+        let durationKeys = ["window_seconds", "limit_window_seconds", "window_duration_seconds"]
+        if let duration = durationKeys.compactMap({ dict[$0] as? Double }).first {
+            return duration > 24 * 60 * 60
+        }
+        for key in ["window_type", "window_name", "duration"] {
+            if let value = dict[key] as? String {
+                let normalized = value.lowercased()
+                if normalized.contains("week") || normalized.contains("7_day") || normalized.contains("seven") {
+                    return true
+                }
+                if normalized.contains("hour") || normalized.contains("5_hour") || normalized.contains("five") {
+                    return false
+                }
+            }
+        }
+        if let resetAt = dict["reset_at"] as? Double {
+            return resetAt - Date().timeIntervalSince1970 > 24 * 60 * 60
+        }
+        return false
     }
 }

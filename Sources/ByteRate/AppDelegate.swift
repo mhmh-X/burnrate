@@ -148,6 +148,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refresh() async {
         // 撞上在飞请求时直接返回，不基于陈旧状态做退避/轮询决策
         guard await state.refresh() else { return }
+        state.normalizeMenuBarMode()
+        updateMenuTitles()
         // 额度紧张时加密轮询到 2 分钟，恢复后退回 5 分钟
         let desired = state.isTight ? Self.tightInterval : Self.normalInterval
         if desired != currentInterval { scheduleTimer(interval: desired) }
@@ -285,6 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let raw = sender.representedObject as? String,
               let mode = Settings.MenuBarMode(rawValue: raw) else { return }
         Settings.menuBarMode = mode
+        state.normalizeMenuBarMode()
         updateStatusImage()
         updateMenuTitles()
     }
@@ -305,6 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         state.bumpSettings()
         if claude, Settings.showClaude { configureTaskStatusDefaults() }
+        state.normalizeMenuBarMode()
         updateStatusImage()
         updateMenuTitles()
         resizeHosting()
@@ -473,6 +477,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for (mode, item) in displayItems {
             item.title = modeTitles[mode] ?? ""
             item.state = Settings.menuBarMode == mode ? .on : .off
+            item.isEnabled = state.hasMenuBarWindow(mode)
         }
 
         showClaudeItem.state = Settings.showClaude ? .on : .off
