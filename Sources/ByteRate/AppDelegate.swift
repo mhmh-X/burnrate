@@ -245,7 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusTimer = nil
         // Claude 状态读本地小 JSON 文件；200ms 只用于菜单栏 loading 动画，Codex 探针另行节流。
         statusTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tickStatus() }
+            Task { @MainActor [weak self] in self?.tickStatus() }
         }
     }
 
