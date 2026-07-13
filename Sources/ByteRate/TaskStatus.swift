@@ -146,11 +146,16 @@ enum TaskStatus {
     }
 }
 
-/// Codex 任务状态：只读会话文件末尾事件，不读取对话内容。
+/// Codex 任务状态：只读会话文件末尾事件和任务标题片段。
 /// app-server 独立进程目前只能看到 notLoaded，拿不到桌面端活跃 thread；这里读文件末尾事件兜住 running。
 enum CodexTaskStatus {
+    struct Snapshot {
+        let state: TaskStatus.State
+        let tasks: [String]
+    }
+
     private enum SessionEvent {
-        case started(Date)
+        case started(Date, String?)
         case completed
     }
 
@@ -159,38 +164,46 @@ enum CodexTaskStatus {
     private static let tailBytes = 128 * 1024
 
     static func current() -> TaskStatus.State {
-        guard let (file, modified) = latestSessionFile() else { return .none }
-        let now = Date()
-
-        switch lastSessionEvent(in: file) {
-        case .started(let started) where now.timeIntervalSince(started) < staleStartedAfter:
-            return .running
-        case .completed:
-            return .none
-        case .started, .none:
-            return now.timeIntervalSince(modified) <= activeAfterWrite ? .running : .none
-        }
+        currentSnapshot().state
     }
 
-    private static func latestSessionFile() -> (URL, Date)? {
+    static func currentSnapshot() -> Snapshot {
+        let now = Date()
+        let active = sessionFiles().compactMap { file, modified -> (Date, String)? in
+            switch lastSessionEvent(in: file) {
+            case .started(let started, let title) where now.timeIntervalSince(started) < staleStartedAfter:
+                return (started, title ?? "Codex")
+            case .completed:
+                return nil
+            case .started:
+                return nil
+            case .none:
+                guard now.timeIntervalSince(modified) <= activeAfterWrite else { return nil }
+                return (modified, latestTitle(in: file) ?? "Codex")
+            }
+        }.sorted { $0.0 > $1.0 }
+
+        return Snapshot(state: active.isEmpty ? .none : .running,
+                        tasks: active.map(\.1))
+    }
+
+    private static func sessionFiles() -> [(URL, Date)] {
         let sessions = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/sessions")
         guard let files = FileManager.default.enumerator(
             at: sessions,
             includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return nil }
+        ) else { return [] }
 
-        var latest: (URL, Date)?
+        var result: [(URL, Date)] = []
         for case let file as URL in files where file.pathExtension == "jsonl" {
             guard let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
                   values.isRegularFile == true,
                   let modified = values.contentModificationDate else { continue }
-            if latest.map({ modified > $0.1 }) ?? true {
-                latest = (file, modified)
-            }
+            result.append((file, modified))
         }
-        return latest
+        return result
     }
 
     private static func lastSessionEvent(in file: URL) -> SessionEvent? {
@@ -202,31 +215,67 @@ enum CodexTaskStatus {
         try? handle.seek(toOffset: offset)
         guard let text = String(data: handle.readDataToEndOfFile(), encoding: .utf8) else { return nil }
 
-        let lines = text.split(whereSeparator: \.isNewline).reversed()
+        let lines = text.split(whereSeparator: \.isNewline)
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var latestEvent: SessionEvent?
+        var latestTitle: String?
 
         for line in lines {
             guard let data = String(line).data(using: .utf8),
                   let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  root["type"] as? String == "event_msg",
-                  let payload = root["payload"] as? [String: Any],
+                  let payload = root["payload"] as? [String: Any] else { continue }
+            if root["type"] as? String == "response_item",
+               payload["role"] as? String == "user",
+               let title = userMessageText(payload) {
+                latestTitle = title
+            }
+            guard root["type"] as? String == "event_msg",
                   let type = payload["type"] as? String else { continue }
             if type == "task_complete" {
-                return .completed
+                latestEvent = .completed
             }
             if type == "task_started" {
+                var started = Date()
                 if let raw = payload["started_at"] as? String,
-                   let started = formatter.date(from: raw) {
-                    return .started(started)
+                   let date = formatter.date(from: raw) {
+                    started = date
+                } else if let raw = root["timestamp"] as? String,
+                          let date = formatter.date(from: raw) {
+                    started = date
                 }
-                if let raw = root["timestamp"] as? String,
-                   let started = formatter.date(from: raw) {
-                    return .started(started)
-                }
-                return .started(Date())
+                latestEvent = .started(started, latestTitle)
             }
         }
+        return latestEvent
+    }
+
+    private static func latestTitle(in file: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let offset = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
+        try? handle.seek(toOffset: offset)
+        guard let text = String(data: handle.readDataToEndOfFile(), encoding: .utf8) else { return nil }
+        for line in text.split(whereSeparator: \.isNewline).reversed() {
+            guard let data = String(line).data(using: .utf8),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  root["type"] as? String == "response_item",
+                  let payload = root["payload"] as? [String: Any],
+                  payload["role"] as? String == "user" else { continue }
+            if let title = userMessageText(payload) { return title }
+        }
         return nil
+    }
+
+    private static func userMessageText(_ payload: [String: Any]) -> String? {
+        guard let content = payload["content"] as? [[String: Any]] else { return nil }
+        let text = content.compactMap { $0["text"] as? String }
+            .joined(separator: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if text.count <= 80 { return text }
+        return String(text.prefix(80)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
     }
 }

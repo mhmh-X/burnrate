@@ -20,6 +20,8 @@ final class AppState: ObservableObject {
     @Published var taskStatus: TaskStatus.State = .none
     /// Codex 任务状态（通过本机会话文件末尾事件 best-effort 获取）。
     @Published var codexTaskStatus: TaskStatus.State = .none
+    /// Codex 当前仍在运行的任务标题（来自本地会话中的用户消息片段）。
+    @Published var codexTasks: [String] = []
 
     func setLanguage(_ code: String) {
         L.set(code)

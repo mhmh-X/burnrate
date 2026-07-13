@@ -17,7 +17,7 @@ struct MenuView: View {
                 Divider()
             }
             if Settings.showCodex {
-                ProviderSection(title: "Codex", icon: Image(nsImage: Icons.openAI(size: 16)), iconIsTemplate: true, state: state.codex, note: state.codexNote, updated: state.codexUpdated, refreshing: state.refreshing, now: now, taskStatus: state.codexTaskStatus)
+                ProviderSection(title: "Codex", icon: Image(nsImage: Icons.openAI(size: 16)), iconIsTemplate: true, state: state.codex, note: state.codexNote, updated: state.codexUpdated, refreshing: state.refreshing, now: now, taskStatus: state.codexTaskStatus, taskTitles: state.codexTasks, showTaskStatusInHeader: false)
             }
         }
         .padding(.horizontal, 14)
@@ -37,6 +37,8 @@ private struct ProviderSection: View {
     let refreshing: Bool
     let now: Date
     var taskStatus: TaskStatus.State = .none
+    var taskTitles: [String] = []
+    var showTaskStatusInHeader = true
 
     private func isPaidPlan(_ plan: String?) -> Bool {
         guard let p = plan?.lowercased() else { return false }
@@ -56,10 +58,29 @@ private struct ProviderSection: View {
         }
     }
 
+    @ViewBuilder private var taskDetails: some View {
+        if !taskTitles.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(taskTitles.prefix(3).enumerated()), id: \.offset) { _, title in
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text(title).lineLimit(1)
+                    }
+                }
+                if taskTitles.count > 3 {
+                    Text(L.t("还有 \(taskTitles.count - 3) 个任务运行中", "+\(taskTitles.count - 3) more running"))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                headerIcon
+                if showTaskStatusInHeader { headerIcon } else if iconIsTemplate { icon.renderingMode(.template).foregroundStyle(.primary) } else { icon }
                 Text(title).font(.headline)
                 if case .ok(let u) = state, let plan = u.plan {
                     Text(plan.capitalized)
@@ -95,6 +116,7 @@ private struct ProviderSection: View {
             }
             .font(.caption2).foregroundStyle(.secondary)
             .padding(.top, 1)
+            taskDetails
             switch state {
             case .loading:
                 Text(L.t("加载中…", "Loading…")).font(.caption).foregroundStyle(.secondary)

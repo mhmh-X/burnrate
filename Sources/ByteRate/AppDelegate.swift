@@ -270,11 +270,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         codexProbeInFlight = true
         lastCodexProbe = Date()
         Task.detached(priority: .utility) {
-            let current = CodexTaskStatus.current()
+            let snapshot = CodexTaskStatus.currentSnapshot()
             await MainActor.run {
                 self.codexProbeInFlight = false
-                if current != self.state.codexTaskStatus {
-                    self.state.codexTaskStatus = current
+                if snapshot.state != self.state.codexTaskStatus || snapshot.tasks != self.state.codexTasks {
+                    self.state.codexTaskStatus = snapshot.state
+                    self.state.codexTasks = snapshot.tasks
                     self.updateStatusImage()
                 }
             }
